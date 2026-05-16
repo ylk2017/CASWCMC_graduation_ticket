@@ -3,12 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🎓 畢業典禮入場系統</title>
+<title>🎓 畢業典禮入場系統（多裝置同步版）</title>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -24,6 +26,34 @@ body {
 .header h1 { color: #764ba2; font-size: 1.5em; margin-bottom: 6px; }
 .header .school { color: #333; font-size: 1.1em; font-weight: 600; margin-bottom: 4px; }
 .header p { color: #666; font-size: 0.9em; }
+.sync-bar {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;
+  margin-top: 12px; align-items: center;
+}
+.sync-pill {
+  padding: 6px 14px; border-radius: 20px; font-size: 0.85em; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.sync-pill.connecting { background: #fff3cd; color: #856404; }
+.sync-pill.connected { background: #d4edda; color: #155724; }
+.sync-pill.offline { background: #f8d7da; color: #721c24; }
+.sync-pill.online-count { background: #d1ecf1; color: #0c5460; }
+.sync-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: currentColor;
+  animation: pulse 1.5s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+.teacher-input {
+  padding: 6px 12px; border: 2px solid #764ba2; border-radius: 20px;
+  font-size: 0.85em; max-width: 200px;
+}
+.diag-box {
+  background: #fff3cd; border: 2px solid #ffc107; border-radius: 8px;
+  padding: 10px 14px; margin-top: 10px; font-size: 0.85em;
+  text-align: left; display: none; color: #856404;
+}
+.diag-box.show { display: block; }
+.diag-box code { background: rgba(0,0,0,0.1); padding: 1px 5px; border-radius: 3px; }
 .tabs {
   display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap;
   background: white; padding: 8px; border-radius: 12px;
@@ -110,8 +140,6 @@ input[type="text"] {
   width: 0%; transition: width 0.3s; text-align: center; color: white;
   font-size: 0.8em; line-height: 20px;
 }
-
-/* Dashboard 儀表板樣式 */
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
@@ -141,8 +169,6 @@ input[type="text"] {
 .dash-cell.full { background: #e8f5e9; border-color: #28a745; }
 .dash-cell.partial { background: #fff3e0; border-color: #ff9800; }
 .dash-cell.none { background: #f5f5f5; border-color: #e0e0e0; }
-
-/* Modal */
 .modal-backdrop {
   display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0,0,0,0.5); z-index: 1000;
@@ -168,12 +194,9 @@ input[type="text"] {
 }
 .ticket-row .tag.used { background: #28a745; color: white; }
 .ticket-row .tag.unused { background: #ddd; color: #666; }
-
 .legend { display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0; font-size: 0.85em; }
 .legend-item { display: flex; align-items: center; gap: 6px; }
 .legend-box { width: 18px; height: 18px; border-radius: 4px; border: 2px solid; }
-
-/* 使用說明樣式 */
 .guide-section {
   background: #f9f9f9; padding: 16px; border-radius: 10px;
   margin-bottom: 16px; border-left: 4px solid #764ba2;
@@ -190,7 +213,6 @@ input[type="text"] {
   color: white; border-radius: 50%; text-align: center; line-height: 26px;
   font-weight: bold; margin-right: 8px;
 }
-
 @media (max-width: 600px) {
   .tab { min-width: 45%; font-size: 0.82em; padding: 10px 4px; }
   .header h1 { font-size: 1.2em; }
@@ -207,6 +229,17 @@ input[type="text"] {
     <div class="school">宣道會陳朱素華紀念中學</div>
     <h1>🎓 畢業典禮入場系統</h1>
     <p>QR Code 電子入場券管理 · 共 139 位學生 × 2 張票 = 278 張</p>
+    <div class="sync-bar">
+      <span id="syncPill" class="sync-pill connecting">
+        <span class="sync-dot"></span><span id="syncText">連接雲端中...</span>
+      </span>
+      <span class="sync-pill online-count">
+        👥 <span id="onlineCount">1</span> 部裝置在線
+      </span>
+      <input type="text" id="teacherName" class="teacher-input"
+             placeholder="輸入你的名稱（可選）" oninput="updateTeacherName()">
+    </div>
+    <div class="diag-box" id="diagBox"></div>
   </div>
 
   <div class="tabs">
@@ -219,7 +252,6 @@ input[type="text"] {
   </div>
 
   <div class="content">
-    <!-- Panel 0: 產生入場券 -->
     <div class="panel active" id="panel-0">
       <h2>🎫 產生學生入場券</h2>
       <div class="notice">
@@ -244,11 +276,10 @@ input[type="text"] {
       <div class="grid" id="ticketsGrid"></div>
     </div>
 
-    <!-- Panel 1: 鏡頭掃描 -->
     <div class="panel" id="panel-1">
       <h2>📷 鏡頭即時掃描</h2>
       <div class="notice">
-        💡 需要 HTTPS 網址及授權鏡頭權限。T1 與 T2 分別驗證，每張票只可使用一次。
+        💡 需要 HTTPS 網址及授權鏡頭權限。所有裝置的掃描記錄會即時同步。
       </div>
       <div style="text-align:center;">
         <button class="btn btn-primary" id="startScanBtn" onclick="startScan()">▶️ 啟動鏡頭</button>
@@ -258,7 +289,6 @@ input[type="text"] {
       <div class="scan-result" id="scanResult"></div>
     </div>
 
-    <!-- Panel 2: 圖片掃描 -->
     <div class="panel" id="panel-2">
       <h2>🖼️ 上傳 QR Code 圖片</h2>
       <div class="notice">
@@ -269,7 +299,6 @@ input[type="text"] {
       <div class="scan-result" id="imageResult"></div>
     </div>
 
-    <!-- Panel 3: 手動輸入 -->
     <div class="panel" id="panel-3">
       <h2>⌨️ 手動輸入票券編號</h2>
       <div class="notice">
@@ -283,13 +312,11 @@ input[type="text"] {
       <div class="scan-result" id="manualResult"></div>
     </div>
 
-    <!-- Panel 4: 掃描儀表板 -->
     <div class="panel" id="panel-4">
       <h2>📊 掃描儀表板</h2>
       <div class="notice-blue">
-        💡 顯示全部 <b>278 張門票</b>的即時入場狀態。點擊任何學生格子可手動<b>標記入場</b>或<b>收回入場記錄</b>。
+        💡 顯示全部 <b>278 張門票</b>的即時入場狀態。所有裝置同步顯示。點擊任何學生格子可手動<b>標記入場</b>或<b>收回入場記錄</b>。
       </div>
-
       <div class="stats">
         <div class="stat-card green"><div class="num" id="statUsed">0</div><div class="label">已入場 / 278</div></div>
         <div class="stat-card orange"><div class="num" id="statPercent">0%</div><div class="label">入場率</div></div>
@@ -299,7 +326,6 @@ input[type="text"] {
         <div class="stat-card"><div class="num" id="stat6D">0/54</div><div class="label">6D</div></div>
         <div class="stat-card"><div class="num" id="stat6S">0/68</div><div class="label">6S</div></div>
       </div>
-
       <div class="filter-row">
         <label><b>班別：</b></label>
         <select id="dashClassFilter" onchange="renderDashboard()">
@@ -321,20 +347,35 @@ input[type="text"] {
         <button class="btn btn-success btn-sm" onclick="exportCSV()">📥 匯出 CSV</button>
         <button class="btn btn-danger btn-sm" onclick="clearRecords()">🗑️ 清除全部</button>
       </div>
-
       <div class="legend">
         <div class="legend-item"><div class="legend-box" style="background:#e8f5e9; border-color:#28a745;"></div>全部入場 2/2</div>
         <div class="legend-item"><div class="legend-box" style="background:#fff3e0; border-color:#ff9800;"></div>部分入場 1/2</div>
         <div class="legend-item"><div class="legend-box" style="background:#f5f5f5; border-color:#e0e0e0;"></div>未入場 0/2</div>
       </div>
-
       <div class="dashboard-grid" id="dashboardGrid"></div>
     </div>
 
-    <!-- Panel 5: 使用說明 -->
     <div class="panel" id="panel-5">
       <h2>📖 使用說明</h2>
-
+      <div class="guide-section">
+        <h3>☁️ 多裝置同步功能</h3>
+        <ul>
+          <li>本系統已連接 <b>Firebase 雲端資料庫</b>，多部裝置開啟同一個網址即可同步</li>
+          <li>頂部狀態列會顯示「已連接雲端」及在線裝置數</li>
+          <li>任何裝置掃描的票券會<b>即時</b>同步到其他所有裝置（1 秒內）</li>
+          <li>建議每位驗票老師在頂部輸入自己的名稱（例如「陳 Sir (正門)」）以便追蹤</li>
+          <li>如果網絡斷開，狀態會變成「離線」，連線恢復後會自動同步</li>
+        </ul>
+      </div>
+      <div class="guide-section">
+        <h3>⚠️ 顯示「離線」或儀表板冇更新？</h3>
+        <ol>
+          <li><span class="step-num">1</span>確認 <code>firebaseConfig</code> 內有 <b>databaseURL</b> 欄位（呢個係最常見問題！）</li>
+          <li><span class="step-num">2</span>確認 Firebase Console → Build → <b>Realtime Database</b>（唔係 Firestore）已建立</li>
+          <li><span class="step-num">3</span>確認資料庫 Rules 設定為：<br><code>{ "rules": { ".read": true, ".write": true } }</code></li>
+          <li><span class="step-num">4</span>按 F12 開瀏覽器 Console 睇有冇紅色錯誤訊息</li>
+        </ol>
+      </div>
       <div class="guide-section">
         <h3>🎫 系統概覽</h3>
         <p>本系統為<b>宣道會陳朱素華紀念中學畢業典禮</b>的電子入場券管理工具：</p>
@@ -345,7 +386,6 @@ input[type="text"] {
           <li>支援多種驗票方式：鏡頭掃描、圖片上傳、手動輸入、儀表板標記</li>
         </ul>
       </div>
-
       <div class="guide-section">
         <h3>📋 典禮前準備</h3>
         <ol>
@@ -353,71 +393,21 @@ input[type="text"] {
           <li><span class="step-num">2</span>選擇班別（或全部），點擊「<b>下載全部 PDF（ZIP）</b>」</li>
           <li><span class="step-num">3</span>等待進度條完成，系統會自動下載 ZIP 壓縮檔</li>
           <li><span class="step-num">4</span>解壓後每位學生一個 PDF 檔（如 <code>6A01.pdf</code>），包含 T1、T2 兩張票</li>
-          <li><span class="step-num">5</span>可列印後沿中間虛線剪開，或直接電子傳送給學生</li>
         </ol>
       </div>
-
-      <div class="guide-section">
-        <h3>✅ 典禮當日驗票</h3>
-        <p><b>方式一：鏡頭即時掃描（推薦）</b></p>
-        <ol>
-          <li>進入「<b>📷 鏡頭掃描</b>」，點擊「啟動鏡頭」</li>
-          <li>授權鏡頭權限後，將票券 QR Code 對準鏡頭</li>
-          <li>系統自動驗證並顯示結果，<b>綠色</b>表示成功，<b>黃色</b>表示已使用，<b>紅色</b>表示無效</li>
-        </ol>
-        <p><b>方式二：圖片上傳掃描</b></p>
-        <ol>
-          <li>進入「<b>🖼️ 圖片掃描</b>」，上傳 QR Code 截圖或拍攝照片</li>
-          <li>適用於鏡頭無法使用的情況（例如沒有 HTTPS）</li>
-        </ol>
-        <p><b>方式三：手動輸入編號</b></p>
-        <ol>
-          <li>進入「<b>⌨️ 手動輸入</b>」，輸入完整票券編號（如 <code>6A01-T1</code>）</li>
-          <li>適用於 QR Code 破損或模糊的情況</li>
-        </ol>
-      </div>
-
       <div class="guide-section">
         <h3>📊 掃描儀表板操作</h3>
         <ul>
-          <li>實時顯示全部 278 張門票狀態，每位學生一格</li>
-          <li>顏色說明：<b style="color:#28a745;">綠色=全部入場</b>、<b style="color:#ff9800;">橙色=部分入場</b>、<b style="color:#888;">灰色=未入場</b></li>
-          <li>點擊任何學生格子可彈出對話框：
-            <ul>
-              <li>✅ <b>標記入場</b>：為 T1 或 T2 手動標記已入場（適用於特殊情況）</li>
-              <li>↩️ <b>收回入場記錄</b>：誤掃或需要撤銷時使用</li>
-            </ul>
-          </li>
-          <li>可用班別、狀態、搜尋框即時篩選</li>
-          <li>可匯出 CSV 入場記錄供後續統計</li>
-        </ul>
-      </div>
-
-      <div class="guide-section">
-        <h3>⚠️ 常見問題</h3>
-        <ul>
-          <li><b>鏡頭無法啟動？</b>請確保使用 HTTPS 網址，並在瀏覽器允許鏡頭權限。若無法解決，可用「圖片掃描」或「手動輸入」。</li>
-          <li><b>資料會遺失嗎？</b>入場記錄儲存於瀏覽器記憶體，<b>請勿關閉視窗或重新整理</b>。建議定期匯出 CSV 備份。</li>
-          <li><b>可以多人同時驗票嗎？</b>可以，但每部裝置的記錄是獨立的。建議只用一部主裝置，其他裝置僅作備援。</li>
-          <li><b>票券遺失怎麼辦？</b>使用手動輸入功能，或於儀表板找到該學生後點擊手動標記入場。</li>
-          <li><b>怎樣備份記錄？</b>在儀表板點擊「匯出 CSV」即可下載完整入場記錄檔案。</li>
-        </ul>
-      </div>
-
-      <div class="guide-section">
-        <h3>🔐 安全注意事項</h3>
-        <ul>
-          <li>每張票券只能使用一次，重複掃描會顯示警告</li>
-          <li>無效編號不會被記錄，避免誤操作</li>
-          <li>建議典禮結束後立即匯出 CSV 作為存檔</li>
-          <li>如需重設，可點擊「清除全部」（此操作無法復原）</li>
+          <li>實時顯示全部 278 張門票狀態，每位學生一格，<b>所有裝置同步</b></li>
+          <li>顏色：<b style="color:#28a745;">綠色=全部入場</b>、<b style="color:#ff9800;">橙色=部分入場</b>、<b style="color:#888;">灰色=未入場</b></li>
+          <li>點擊學生格子可手動標記入場或收回入場記錄</li>
+          <li>可用班別、狀態、搜尋框即時篩選；可匯出 CSV</li>
         </ul>
       </div>
     </div>
   </div>
 </div>
 
-<!-- Modal for manual check-in/out -->
 <div class="modal-backdrop" id="modalBackdrop" onclick="if(event.target===this) closeModal()">
   <div class="modal">
     <h3>🎫 門票狀態管理</h3>
@@ -433,6 +423,26 @@ input[type="text"] {
 </div>
 
 <script>
+/* ============================================================
+   🔥 Firebase 設定
+   ⚠️⚠️⚠️ 重要：必須有 databaseURL ⚠️⚠️⚠️
+   去 Firebase Console → Realtime Database 確認你嘅 URL
+   亞洲區會係：https://xxx-default-rtdb.asia-southeast1.firebasedatabase.app
+   美國區會係：https://xxx-default-rtdb.firebaseio.com
+   ============================================================ */
+const firebaseConfig = {
+  apiKey: "AIzaSyDuOVisip4sdHiHa1X8jp9y_fLEyJ0uj8c",
+  authDomain: "graduation-swc.firebaseapp.com",
+  databaseURL: "https://graduation-swc-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "graduation-swc",
+  storageBucket: "graduation-swc.firebasestorage.app",
+  messagingSenderId: "1084747219750",
+  appId: "1:1084747219750:web:842f34f44d7366df1c77e7"
+};
+/* ⚠️ 如果你嘅 Realtime Database 喺美國區，請改為：
+   databaseURL: "https://graduation-swc-default-rtdb.firebaseio.com"
+   ============================================================ */
+
 const SCHOOL_NAME = '宣道會陳朱素華紀念中學';
 const CLASSES = [
   { name: '6A', count: 27 },
@@ -455,8 +465,116 @@ STUDENTS.forEach(s => {
   VALID_TICKETS.add(`${s}-T2`);
 });
 
-// records: Map<ticket, {time, method}>
 const records = new Map();
+
+let recordsRef = null, presenceRef = null, myPresenceRef = null;
+const MY_DEVICE_ID = 'dev_' + Math.random().toString(36).substr(2, 9);
+let myTeacherName = '';
+
+function setSyncStatus(state, message) {
+  const pill = document.getElementById('syncPill');
+  const text = document.getElementById('syncText');
+  pill.className = 'sync-pill ' + state;
+  text.textContent = message;
+}
+
+function showDiagnostic(html) {
+  const box = document.getElementById('diagBox');
+  box.innerHTML = html;
+  box.classList.add('show');
+}
+
+/* 🔍 啟動診斷 */
+console.log('=== Firebase 啟動診斷 ===');
+console.log('1. firebaseConfig:', firebaseConfig);
+
+if (!firebaseConfig.databaseURL) {
+  console.error('❌ 致命錯誤：firebaseConfig 缺少 databaseURL');
+  setSyncStatus('offline', '❌ 缺少 databaseURL');
+  showDiagnostic(
+    '⚠️ <b>偵測到 Firebase 設定缺少 <code>databaseURL</code></b><br>' +
+    '請開啟 Firebase Console → <b>Build → Realtime Database</b>，建立資料庫後將 URL 貼入 firebaseConfig。<br>' +
+    '示例：<code>databaseURL: "https://你嘅專案-default-rtdb.firebaseio.com"</code>'
+  );
+} else {
+  try {
+    firebase.initializeApp(firebaseConfig);
+    console.log('2. ✓ Firebase App 已初始化');
+    const db = firebase.database();
+    console.log('3. ✓ Database 物件:', db);
+    recordsRef = db.ref('ceremony2025/records');
+    presenceRef = db.ref('ceremony2025/presence');
+    myPresenceRef = db.ref('ceremony2025/presence/' + MY_DEVICE_ID);
+
+    // 連線狀態監聽
+    db.ref('.info/connected').on('value', snap => {
+      console.log('4. 連線狀態變化:', snap.val());
+      if (snap.val() === true) {
+        setSyncStatus('connected', '✓ 已連接雲端');
+        myPresenceRef.set({
+          online: true,
+          teacher: myTeacherName || '未命名',
+          at: firebase.database.ServerValue.TIMESTAMP
+        }).catch(err => {
+          console.error('❌ 寫入 presence 失敗:', err);
+          showDiagnostic(
+            '⚠️ <b>無法寫入資料庫</b>：' + err.message + '<br>' +
+            '請檢查 Realtime Database 嘅 Rules 設定為：<br>' +
+            '<code>{ "rules": { ".read": true, ".write": true } }</code>'
+          );
+        });
+        myPresenceRef.onDisconnect().remove();
+      } else {
+        setSyncStatus('offline', '⚠ 離線（嘗試重新連接...）');
+      }
+    }, err => {
+      console.error('❌ 連線監聽錯誤:', err);
+      setSyncStatus('offline', '❌ 連線失敗');
+      showDiagnostic('連線失敗：' + err.message + '<br>請按 F12 睇 Console 詳情。');
+    });
+
+    // 監聽記錄
+    recordsRef.on('value', snap => {
+      console.log('5. ✓ 收到 records 更新，數量:', snap.numChildren());
+      records.clear();
+      const data = snap.val() || {};
+      Object.entries(data).forEach(([code, info]) => {
+        records.set(code, info);
+      });
+      // 永遠同時更新統計同儀表板（如果儀表板已 render 過）
+      updateDashboardStats();
+      if (document.getElementById('dashboardGrid').children.length > 0
+          || document.getElementById('panel-4').classList.contains('active')) {
+        renderDashboard();
+      }
+      if (currentModalSid) renderModalTickets();
+    }, err => {
+      console.error('❌ 讀取 records 失敗:', err);
+      showDiagnostic(
+        '⚠️ <b>無法讀取資料庫</b>：' + err.message + '<br>' +
+        '可能原因：1) Rules 未設為公開讀寫 2) databaseURL 錯誤'
+      );
+    });
+
+    // 在線人數
+    presenceRef.on('value', snap => {
+      const count = snap.numChildren();
+      document.getElementById('onlineCount').textContent = count || 1;
+    });
+
+  } catch (e) {
+    console.error('❌ Firebase 初始化錯誤:', e);
+    setSyncStatus('offline', '❌ 初始化失敗');
+    showDiagnostic('Firebase 初始化失敗：' + e.message);
+  }
+}
+
+function updateTeacherName() {
+  myTeacherName = document.getElementById('teacherName').value.trim();
+  if (myPresenceRef) {
+    myPresenceRef.update({ teacher: myTeacherName || '未命名' });
+  }
+}
 
 function switchTab(i) {
   document.querySelectorAll('.tab').forEach((t, idx) => t.classList.toggle('active', idx === i));
@@ -515,79 +633,61 @@ function drawTicketCanvas(studentId, ticketNo, qrDataUrl) {
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
-
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, W, H);
-
     ctx.strokeStyle = '#764ba2';
     ctx.lineWidth = 6;
     ctx.strokeRect(20, 20, W - 40, H - 40);
-
     ctx.strokeStyle = '#b39ddb';
     ctx.lineWidth = 2;
     ctx.strokeRect(35, 35, W - 70, H - 70);
-
     ctx.fillStyle = '#764ba2';
     ctx.fillRect(35, 35, W - 70, 90);
-
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 42px "PingFang TC", "Microsoft JhengHei", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(SCHOOL_NAME, W / 2, 80);
-
     ctx.fillStyle = '#333333';
     ctx.font = 'bold 38px "PingFang TC", "Microsoft JhengHei", sans-serif';
     ctx.fillText('畢業典禮入場券', W / 2, 175);
-
     ctx.fillStyle = '#666666';
     ctx.font = '22px "PingFang TC", sans-serif';
     ctx.fillText('Graduation Ceremony Admission Ticket', W / 2, 215);
-
     ctx.strokeStyle = '#764ba2';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(100, 245); ctx.lineTo(W - 100, 245);
     ctx.stroke();
-
     const img = new Image();
     img.onload = () => {
       const qrSize = 340;
       const qrX = 120, qrY = 280;
       ctx.drawImage(img, qrX, qrY, qrSize, qrSize);
-
       ctx.strokeStyle = '#333';
       ctx.lineWidth = 2;
       ctx.strokeRect(qrX, qrY, qrSize, qrSize);
-
       const rightX = qrX + qrSize + 80;
-
       ctx.fillStyle = '#666666';
       ctx.font = '26px "PingFang TC", sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText('學生編號 Student ID', rightX, 310);
-
       ctx.fillStyle = '#764ba2';
       ctx.font = 'bold 90px Arial, sans-serif';
       ctx.fillText(studentId, rightX, 390);
-
       ctx.fillStyle = '#666666';
       ctx.font = '26px "PingFang TC", sans-serif';
       ctx.fillText('票券編號 Ticket No.', rightX, 460);
-
       ctx.fillStyle = '#eb3349';
       ctx.font = 'bold 76px Arial, sans-serif';
       ctx.fillText(ticketNo, rightX, 535);
-
       ctx.fillStyle = '#888888';
       ctx.font = '20px "PingFang TC", sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText('請於典禮入口出示此 QR Code 入場 · Please present this QR code at the entrance', W / 2, H - 70);
-
       ctx.fillStyle = '#aaaaaa';
       ctx.font = '18px Arial, sans-serif';
       ctx.fillText(`Code: ${studentId}-${ticketNo}`, W / 2, H - 45);
-
       resolve(canvas.toDataURL('image/png'));
     };
     img.src = qrDataUrl;
@@ -599,16 +699,12 @@ async function generateStudentPDF(studentId) {
   const qr2 = await makeQRDataUrl(`${studentId}-T2`);
   const ticket1Img = await drawTicketCanvas(studentId, 'T1', qr1);
   const ticket2Img = await drawTicketCanvas(studentId, 'T2', qr2);
-
   const { jsPDF } = window.jspdf;
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-
   const ticketW = 190;
   const ticketH = ticketW * (700 / 1200);
   const x = (210 - ticketW) / 2;
-
   pdf.addImage(ticket1Img, 'PNG', x, 15, ticketW, ticketH);
-
   const cutY = 15 + ticketH + 12;
   pdf.setDrawColor(180, 180, 180);
   pdf.setLineDashPattern([3, 2], 0);
@@ -617,9 +713,7 @@ async function generateStudentPDF(studentId) {
   pdf.setFontSize(9);
   pdf.setTextColor(150, 150, 150);
   pdf.text('- - - Cut here - - -', 105, cutY - 2, { align: 'center' });
-
   pdf.addImage(ticket2Img, 'PNG', x, cutY + 10, ticketW, ticketH);
-
   return pdf;
 }
 
@@ -710,7 +804,7 @@ function scanImage(evt) {
       if (code) {
         verifyTicket(code.data, '圖片上傳', 'imageResult');
       } else {
-        showResult('imageResult', 'error', '❌ 無法識別此圖片中的 QR Code，請使用更清晰的圖片。');
+        showResult('imageResult', 'error', '❌ 無法識別此圖片中的 QR Code');
       }
     };
     img.src = e.target.result;
@@ -731,15 +825,54 @@ function verifyTicket(code, method, resultElId) {
     showResult(resultElId, 'error', `❌ 無效票券：${code}<br>此票券不存在`);
     return;
   }
-  if (records.has(code)) {
-    const existing = records.get(code);
-    showResult(resultElId, 'warning', `⚠️ ${code} 已於 ${existing.time} 使用！<br>（此票券已重複）`);
+
+  if (!recordsRef) {
+    if (records.has(code)) {
+      const existing = records.get(code);
+      showResult(resultElId, 'warning', `⚠️ ${code} 已於 ${existing.time} 使用！（離線模式）`);
+      return;
+    }
+    const time = new Date().toLocaleString('zh-HK', { hour12: false });
+    records.set(code, { time, method, teacher: myTeacherName || '未命名' });
+    const [sid, tno] = code.split('-');
+    showResult(resultElId, 'success', `✅ 歡迎入場！（離線模式 - 不會同步）<br><span style="font-size:1.4em;">${sid}</span> · 票券 ${tno}<br>${time}`);
+    updateDashboardStats();
+    renderDashboard();
     return;
   }
+
+  if (records.has(code)) {
+    const existing = records.get(code);
+    showResult(resultElId, 'warning',
+      `⚠️ ${code} 已於 ${existing.time} 使用！<br>` +
+      `驗票員：${existing.teacher || '未命名'}（${existing.method || '-'}）`);
+    return;
+  }
+
   const time = new Date().toLocaleString('zh-HK', { hour12: false });
-  records.set(code, { time, method });
-  const [sid, tno] = code.split('-');
-  showResult(resultElId, 'success', `✅ 歡迎入場！<br><span style="font-size:1.4em;">${sid}</span> · 票券 ${tno}<br>${time}`);
+  const info = { time, method, teacher: myTeacherName || '未命名' };
+
+  recordsRef.child(code).transaction(
+    current => {
+      if (current !== null) return;
+      return info;
+    },
+    (error, committed, snapshot) => {
+      if (error) {
+        console.error('Transaction 錯誤:', error);
+        showResult(resultElId, 'error', `❌ 雲端錯誤：${error.message}`);
+      } else if (!committed) {
+        const existing = snapshot.val();
+        showResult(resultElId, 'warning',
+          `⚠️ ${code} 已於 ${existing.time} 使用！<br>` +
+          `驗票員：${existing.teacher || '未命名'}`);
+      } else {
+        const [sid, tno] = code.split('-');
+        showResult(resultElId, 'success',
+          `✅ 歡迎入場！<br><span style="font-size:1.4em;">${sid}</span> · 票券 ${tno}<br>${time}`);
+      }
+    }
+  );
 }
 
 function showResult(elId, type, html) {
@@ -749,7 +882,6 @@ function showResult(elId, type, html) {
   el.style.display = 'block';
 }
 
-/* ===== 掃描儀表板 ===== */
 function getStudentStatus(sid) {
   const t1 = records.has(`${sid}-T1`);
   const t2 = records.has(`${sid}-T2`);
@@ -759,19 +891,37 @@ function getStudentStatus(sid) {
   return 'none';
 }
 
+function updateDashboardStats() {
+  const usedCount = records.size;
+  const statUsedEl = document.getElementById('statUsed');
+  if (statUsedEl) {
+    statUsedEl.textContent = usedCount;
+    document.getElementById('statPercent').textContent = Math.round(usedCount / 278 * 100) + '%';
+    CLASSES.forEach(c => {
+      let classTotal = c.count * 2;
+      let classUsed = 0;
+      for (let i = 1; i <= c.count; i++) {
+        const sid = `${c.name}${String(i).padStart(2, '0')}`;
+        if (records.has(`${sid}-T1`)) classUsed++;
+        if (records.has(`${sid}-T2`)) classUsed++;
+      }
+      document.getElementById(`stat${c.name}`).textContent = `${classUsed}/${classTotal}`;
+    });
+  }
+}
+
 function renderDashboard() {
-  const classFilter = document.getElementById('dashClassFilter').value;
+  const classFilterEl = document.getElementById('dashClassFilter');
+  if (!classFilterEl) return;
+  const classFilter = classFilterEl.value;
   const statusFilter = document.getElementById('dashStatusFilter').value;
   const search = document.getElementById('dashSearch').value.trim().toUpperCase();
-
   let list = STUDENTS.slice();
   if (classFilter !== 'all') list = list.filter(s => s.startsWith(classFilter));
   if (search) list = list.filter(s => s.includes(search));
   if (statusFilter !== 'all') list = list.filter(s => getStudentStatus(s) === statusFilter);
-
   const grid = document.getElementById('dashboardGrid');
   grid.innerHTML = '';
-
   if (list.length === 0) {
     grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:30px; color:#999;">無符合條件的學生</div>';
   } else {
@@ -792,24 +942,9 @@ function renderDashboard() {
       grid.appendChild(cell);
     });
   }
-
-  // 更新統計
-  const usedCount = records.size;
-  document.getElementById('statUsed').textContent = usedCount;
-  document.getElementById('statPercent').textContent = Math.round(usedCount / 278 * 100) + '%';
-  CLASSES.forEach(c => {
-    let classTotal = c.count * 2;
-    let classUsed = 0;
-    for (let i = 1; i <= c.count; i++) {
-      const sid = `${c.name}${String(i).padStart(2, '0')}`;
-      if (records.has(`${sid}-T1`)) classUsed++;
-      if (records.has(`${sid}-T2`)) classUsed++;
-    }
-    document.getElementById(`stat${c.name}`).textContent = `${classUsed}/${classTotal}`;
-  });
+  updateDashboardStats();
 }
 
-/* ===== Modal 操作 ===== */
 let currentModalSid = null;
 function openModal(sid) {
   currentModalSid = sid;
@@ -825,6 +960,7 @@ function closeModal() {
 
 function renderModalTickets() {
   const sid = currentModalSid;
+  if (!sid) return;
   const container = document.getElementById('modalTicketsList');
   container.innerHTML = '';
   ['T1', 'T2'].forEach(tn => {
@@ -837,7 +973,7 @@ function renderModalTickets() {
       <div>
         <div style="font-weight:bold; font-size:1.1em;">${code}</div>
         <div style="font-size:0.8em; color:#666; margin-top:2px;">
-          ${used ? `✓ ${info.time} (${info.method})` : '尚未入場'}
+          ${used ? `✓ ${info.time} (${info.method})${info.teacher ? ' · '+info.teacher : ''}` : '尚未入場'}
         </div>
       </div>
       <div>
@@ -854,26 +990,41 @@ function renderModalTickets() {
 
 function markTicket(code) {
   const time = new Date().toLocaleString('zh-HK', { hour12: false });
-  records.set(code, { time, method: '手動標記' });
-  renderModalTickets();
-  renderDashboard();
-}
-
-function revokeTicket(code) {
-  if (confirm(`確定要收回 ${code} 的入場記錄嗎？`)) {
-    records.delete(code);
+  const info = { time, method: '手動標記', teacher: myTeacherName || '未命名' };
+  if (recordsRef) {
+    recordsRef.child(code).set(info).catch(err => {
+      console.error('寫入失敗:', err);
+      alert('寫入雲端失敗：' + err.message);
+    });
+  } else {
+    records.set(code, info);
     renderModalTickets();
     renderDashboard();
   }
 }
 
+function revokeTicket(code) {
+  if (confirm(`確定要收回 ${code} 的入場記錄嗎？\n所有裝置都會同步此變更。`)) {
+    if (recordsRef) {
+      recordsRef.child(code).remove().catch(err => {
+        console.error('刪除失敗:', err);
+        alert('刪除雲端記錄失敗：' + err.message);
+      });
+    } else {
+      records.delete(code);
+      renderModalTickets();
+      renderDashboard();
+    }
+  }
+}
+
 function exportCSV() {
   if (records.size === 0) { alert('尚無記錄可匯出'); return; }
-  let csv = '\uFEFF票券編號,學生編號,票號,入場時間,方式\n';
+  let csv = '\uFEFF票券編號,學生編號,票號,入場時間,方式,驗票員\n';
   const sorted = Array.from(records.entries()).sort((a,b) => a[0].localeCompare(b[0]));
   sorted.forEach(([code, info]) => {
     const [sid, tno] = code.split('-');
-    csv += `${code},${sid},${tno},${info.time},${info.method}\n`;
+    csv += `${code},${sid},${tno},${info.time},${info.method},${info.teacher || ''}\n`;
   });
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
@@ -884,9 +1035,16 @@ function exportCSV() {
 }
 
 function clearRecords() {
-  if (confirm('確定要清除所有入場記錄嗎？此操作無法復原。')) {
-    records.clear();
-    renderDashboard();
+  if (confirm('⚠️ 確定要清除所有入場記錄嗎？\n此操作會同步清除所有裝置的記錄，無法復原！')) {
+    if (recordsRef) {
+      recordsRef.remove().catch(err => {
+        console.error('清除失敗:', err);
+        alert('清除雲端記錄失敗：' + err.message);
+      });
+    } else {
+      records.clear();
+      renderDashboard();
+    }
   }
 }
 
